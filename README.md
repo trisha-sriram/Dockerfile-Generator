@@ -1,2 +1,2 @@
 # Dockerfile-Generator
-Generator to create dockerfile from any app
+Generator to create dockerfile for any app
