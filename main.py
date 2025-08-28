@@ -82,9 +82,7 @@ async def generate_dockerfile(request: DockerfileRequest):
         response = model.generate_content(prompt)
 
         # 4. Extract the text from the response and return it.
-        dockerfile_content = getattr(response, "text", None) or "".join(
-            p.text for c in getattr(response, "candidates", []) for p in getattr(c, "content", {}).get("parts", []) if hasattr(p, "text")
-        )
+        dockerfile_content = getattr(response, "text", None)
         if not dockerfile_content:
             raise RuntimeError("Empty response from model")
 
