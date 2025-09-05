@@ -1,18 +1,19 @@
 # main.py
 
 import os
-import boto3
-import json
+import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
-from botocore.exceptions import ClientError
+from typing import Optional
 
 # --- Configuration ---
-# Boto3 will automatically look for AWS credentials in environment variables
-# (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION).
-# Ensure you have enabled model access to 'anthropic.claude-v2:1' in the
-# Amazon Bedrock console for your selected region.
+# 1. Load the API key from an environment variable for security.
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    raise RuntimeError("GOOGLE_API_KEY environment variable not set. Please set it before running.")
+
+# Configure the Google Generative AI SDK
+genai.configure(api_key=GOOGLE_API_KEY)
 
 # --- Pydantic Models ---
 # This defines the structure of the incoming request body.
@@ -22,8 +23,8 @@ class DockerfileRequest(BaseModel):
     dependency_file: str
     port: int
     start_command: str
-    build_command: str | None = None
-    base_image: str | None  = None
+    build_command: Optional[str] = None
+    base_image: Optional[str] = None
 
 # --- FastAPI Application ---
 app = FastAPI()
@@ -64,44 +65,35 @@ def create_prompt(request: DockerfileRequest) -> str:
 # --- API Endpoints ---
 @app.post("/generate")
 async def generate_dockerfile(request: DockerfileRequest):
+    """
+    Receives application details, generates a prompt, calls the Gemini model,
+    and returns the generated Dockerfile.
+    """
     print("Received request:", request.model_dump())
 
-    client = boto3.client("bedrock-runtime", region_name="us-west-2")
-
-    model_id = "anthropic.claude-v2:1"
-
-    prompt = create_prompt(request)
-    print("\n--- Generated Prompt ---\n", prompt)
-
-    native_request = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 512,
-        "temperature": 0.5,
-        "messages": [
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": prompt}],
-            }
-        ],
-
-    }
-
-    bedrock_rq = json.dumps(native_request)
-
     try:
+        # 2. Create the detailed prompt using our helper function.
+        prompt = create_prompt(request)
+        print("\n--- Generated Prompt ---\n", prompt)
 
-        response = client.invoke_model(modelId=model_id, body=bedrock_rq)
+        # 3. Initialize the Gemini model and generate the content.
+        # Use a current, available text model.
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
 
-    except (ClientError, Exception) as e:
-        print(f"ERROR: Can't invoke '{model_id}'. Reason: {e}")
-        exit(1)
+        # 4. Extract the text from the response and return it.
+        dockerfile_content = getattr(response, "text", None)
+        if not dockerfile_content:
+            raise RuntimeError("Empty response from model")
 
-    model_response = json.loads(response["body"].read())
+        print("\n--- Received AI Response ---\n", dockerfile_content)
 
-    response_text = model_response["content"][0]["text"]
-    print(response_text)
+        return {"dockerfile": dockerfile_content}
 
-    return {"dockerfile": response_text}
+    except Exception as e:
+        # Handle potential errors from the API call
+        print(f"An error occurred: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate Dockerfile from the AI model.")
 
 @app.get("/")
 def read_root():
